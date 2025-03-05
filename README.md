@@ -21,6 +21,33 @@ A Model Context Protocol (MCP) server for interacting with Sentry. This MCP serv
    export SENTRY_AUTH=your_sentry_auth_token
    ```
 
+## Using this within an IDE 
+
+This MCP has been verified to work against Codeium Windsurf.
+
+Cursor is currently having issues with its MCP implementation; and this tool is not yet fully functional.
+
+## Using with Claude
+
+To use this MCP server with Claude, add the following configuration to your Claude settings:
+
+```json
+{
+    "mcpServers": {
+        "sentry": {
+            "command": "npx",
+            "args": ["ts-node", "/Users/codydearkland/mcp-sentry-ts/index.ts"],
+            "env": {
+                "SENTRY_DSN": "https://0c9f30459fd17d41a01c6476a20c1d31@o4508130833793024.ingest.us.sentry.io/4508879435071488",
+                "SENTRY_AUTH": "<YOUR_AUTH_TOKEN>"
+            }
+        }
+    }
+}
+```
+
+Replace `<YOUR_AUTH_TOKEN>` with your Sentry authentication token.
+
 ## Available Tools
 
 ### list_projects
@@ -125,27 +152,6 @@ Lists replays from a specific Sentry organization.
 ```
 npx ts-node index.ts
 ```
-
-## Using with Claude
-
-To use this MCP server with Claude, add the following configuration to your Claude settings:
-
-```json
-{
-    "mcpServers": {
-        "sentry": {
-            "command": "npx",
-            "args": ["ts-node", "/Users/codydearkland/mcp-sentry-ts/index.ts"],
-            "env": {
-                "SENTRY_DSN": "https://0c9f30459fd17d41a01c6476a20c1d31@o4508130833793024.ingest.us.sentry.io/4508879435071488",
-                "SENTRY_AUTH": "<YOUR_AUTH_TOKEN>"
-            }
-        }
-    }
-}
-```
-
-Replace `<YOUR_AUTH_TOKEN>` with your Sentry authentication token.
 
 ## Authentication
 
