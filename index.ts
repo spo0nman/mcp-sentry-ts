@@ -292,8 +292,22 @@ server.tool(
         }
       } else {
         // If not a URL, assume it's just the organization slug
-        organizationSlug = 'sentry'; // Default organization slug if not provided
+        // We need to determine the organization from environment variables or other means
+        if (!process.env.SENTRY_ORG) {
+          return {
+            content: [{
+              type: "text",
+              text: `When providing just an issue ID, the SENTRY_ORG environment variable must be set to specify the organization.`
+            }],
+            isError: true
+          };
+        }
+        
+        organizationSlug = process.env.SENTRY_ORG;
       }
+      
+      console.error('DEBUG: Organization slug:', organizationSlug);
+      console.error('DEBUG: Issue ID:', issue_id_or_url);
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organizationSlug}/eventids/${event_id}/`;
@@ -1784,7 +1798,7 @@ server.tool(
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${process.env.SENTRY_AUTH_TOKEN}`,
+          'Authorization': `Bearer ${SENTRY_AUTH}`,
           'Content-Type': 'application/json'
         }
       });
@@ -1795,7 +1809,8 @@ server.tool(
       }
 
       // Parse the response
-      const replays = await response.json() as SentryReplay[];
+      const responseData = await response.json();
+      const replays = responseData.data || [];
       console.error('DEBUG: Found replays:', replays.length);
 
       let output = '';
@@ -1947,7 +1962,7 @@ server.tool(
             if (replay.tags && Object.keys(replay.tags).length > 0) {
               output += `- **Tags**:\n`;
               for (const [key, values] of Object.entries(replay.tags)) {
-                output += `  - ${key}: ${values.join(', ')}\n`;
+                output += `  - ${key}: ${(values as string[]).join(', ')}\n`;
               }
             }
             
@@ -2083,7 +2098,7 @@ server.tool(
             if (replay.tags && Object.keys(replay.tags).length > 0) {
               output += `Tags:\n`;
               for (const [key, values] of Object.entries(replay.tags)) {
-                output += `  ${key}: ${values.join(', ')}\n`;
+                output += `  ${key}: ${(values as string[]).join(', ')}\n`;
               }
             }
             
