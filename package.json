@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "A Model Context Protocol (MCP) server for Sentry",
   "main": "index.ts",
+  "bin": {
+    "mcp-sentry": "./index.ts"
+  },
   "scripts": {
+    "start": "ts-node index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
