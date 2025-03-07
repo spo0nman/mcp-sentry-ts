@@ -14,6 +14,7 @@ import {
   SentryProjectIssue,
   SentryIssueDetailsResponse,
   SentryReplay,
+  SentrySetupResponse,
 } from "./types";
 
 const SENTRY_AUTH = process.env.SENTRY_AUTH;
@@ -326,6 +327,9 @@ server.tool(
       .string()
       .describe("Either a full Sentry issue URL or just the numeric issue ID"),
     event_id: z.string().describe("The specific event ID to retrieve"),
+    organization_slug: z
+      .string()
+      .describe("The slug of the organization the issue belongs to"),
     view: z
       .enum(["summary", "detailed"])
       .default("detailed")
@@ -339,10 +343,12 @@ server.tool(
     issue_id_or_url,
     event_id,
     view,
+    organization_slug,
     format,
   }: {
     issue_id_or_url: string;
     event_id: string;
+    organization_slug: string;
     view: "summary" | "detailed";
     format: "plain" | "markdown";
   }) => {
@@ -366,19 +372,8 @@ server.tool(
       } else {
         // If not a URL, assume it's just the organization slug
         // We need to determine the organization from environment variables or other means
-        if (!process.env.SENTRY_ORG) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `When providing just an issue ID, the SENTRY_ORG environment variable must be set to specify the organization.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        organizationSlug = process.env.SENTRY_ORG;
+      
+        organizationSlug = organization_slug;
       }
 
       console.error("DEBUG: Organization slug:", organizationSlug);
@@ -1666,6 +1661,9 @@ server.tool(
     issue_id_or_url: z
       .string()
       .describe("Either a full Sentry issue URL or just the numeric issue ID"),
+    organization_slug: z
+      .string()
+      .describe("The slug of the organization the issue belongs to"),
     view: z
       .enum(["summary", "detailed"])
       .default("detailed")
@@ -1677,10 +1675,12 @@ server.tool(
   },
   async ({
     issue_id_or_url,
+    organization_slug,
     view,
     format,
   }: {
     issue_id_or_url: string;
+    organization_slug: string;
     view: "summary" | "detailed";
     format: "plain" | "markdown";
   }) => {
@@ -1700,35 +1700,13 @@ server.tool(
         const match = issue_id_or_url.match(urlPattern);
 
         if (!match) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Failed to parse Sentry issue URL: ${issue_id_or_url}. Please provide a valid Sentry issue URL or issue ID.`,
-              },
-            ],
-            isError: true,
-          };
+          organizationSlug = organization_slug;
+        } else {
+          organizationSlug = match[1];
+          issue_id_or_url = match[3];
         }
-
-        organizationSlug = match[1];
-        issue_id_or_url = match[3];
       } else {
-        // Assume issue_id_or_url is just the issue ID
-        // We need to determine the organization from environment variables or other means
-        if (!process.env.SENTRY_ORG) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `When providing just an issue ID, the SENTRY_ORG environment variable must be set to specify the organization.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        organizationSlug = process.env.SENTRY_ORG;
+        organizationSlug = organization_slug;
       }
 
       console.error("DEBUG: Organization slug:", organizationSlug);
@@ -2598,7 +2576,7 @@ server.tool(
 
 server.tool(
   "setup_sentry",
-  "Set up Sentry for a project. This tool creates a new Sentry project and provides the DSN and setup instructions for integrating Sentry into your application. The instructions are language-agnostic and can be used with any programming language or framework.",
+  "Set up Sentry for a project returning a dsn and instructions for setup.",
   {
     organization_slug: z.string().describe("The slug of the organization to create the project in"),
     team_slug: z.string().describe("The slug of the team to associate the project with"),
