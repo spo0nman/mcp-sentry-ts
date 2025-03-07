@@ -571,6 +571,18 @@ export interface SentryEventDetailedResponse {
   sdkUpdates?: any[];
 }
 
+// Define interface for Sentry setup response
+export interface SentrySetupResponse {
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  dsn: string;
+  clientKeys?: SentryClientKey[];
+  installationInstructions: {
+    [language: string]: string;
+  };
+}
+
 // Define interface for Sentry replay response
 export interface SentryReplay {
   activity: number;

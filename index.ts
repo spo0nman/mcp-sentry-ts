@@ -2,9 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import fetch from "node-fetch";
-import { SentryProject, ShortIdResolutionResponse, EventDetailsResponse, SentryProjectCreationResponse, SentryClientKey, SentryErrorEvent, SentryProjectIssue, SentryIssueDetailsResponse, SentryReplay } from "./types";
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+import { SentryProject, ShortIdResolutionResponse, EventDetailsResponse, SentryProjectCreationResponse, SentryClientKey, SentryErrorEvent, SentryProjectIssue, SentryIssueDetailsResponse, SentryReplay, SentrySetupResponse } from "./types";
 
-// Check for the SENTRY_AUTH token
 const SENTRY_AUTH = process.env.SENTRY_AUTH;
 if (!SENTRY_AUTH) {
   console.error("Error: SENTRY_AUTH environment variable is required");
@@ -18,24 +19,21 @@ const server = new McpServer({
 
 server.tool(
   "list_projects",
-  "List all accessible Sentry projects. This tool helps you:\n            - View all projects you have access to\n            - Get project slugs and IDs for use with other tools\n            - Monitor project status and settings\n            - View project features and organization details\n            \n            The output is formatted as a markdown table by default, making it easy to:\n            1. Copy project slugs and IDs for use with other tools\n            2. Sort and filter projects\n            3. Share project summaries",
+  "List all accessible Sentry projects. This tool helps you view all projects you have access to, get project slugs and IDs for use with other tools, and monitor project status and settings. You can also view project features and organization details. The output is formatted as a markdown table by default, making it easy to, copy project slugs and IDs for use with other tools, sort and filter projects, and share project summaries.",
   {
     organization_slug: z.string().describe("The slug of the organization to list projects from"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, view, format }: { 
-    organization_slug: string; 
-    view: "summary" | "detailed"; 
-    format: "plain" | "markdown" 
+  async ({ organization_slug, view, format }: {
+    organization_slug: string;
+    view: "summary" | "detailed";
+    format: "plain" | "markdown"
   }) => {
-    try {
-      // Debug input
 
-      // Construct the URL for the Sentry API
+    try {
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organization_slug}/projects/`;
-      
-      // Make the API request
+
       const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
@@ -48,6 +46,7 @@ server.tool(
       if (!response.ok) {
         const errorText: string = await response.text();
         console.error('DEBUG: API request failed:', response.status, errorText);
+
         return {
           content: [{
             type: "text",
@@ -63,40 +62,40 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown table
           output = '# Sentry Projects\n\n';
           output += '| ID | Name | Slug | Platform | Teams | Environments | Features |\n';
           output += '|----|------|------|----------|-------|--------------|----------|\n';
-          
+
           for (const project of projects) {
             const teams: string = project.teams.map(team => team.name).join(', ');
             const environments: string = project.environments?.join(', ') || 'None';
             const features: string = project.features?.join(', ') || 'None';
-            
+
             output += `| ${project.id} | ${project.name} | ${project.slug} | ${project.platform || 'N/A'} | ${teams} | ${environments} | ${features} |\n`;
           }
-          
+
           // Add summary information
           output += `\n## Summary\n\n`;
           output += `Total Projects: ${projects.length}\n`;
         } else {
           // Create a summary markdown list
           output = '# Sentry Projects\n\n';
-          
+
           for (const project of projects) {
             output += `- **${project.name}** (${project.slug}): ID ${project.id}\n`;
           }
-          
+
           output += `\nTotal Projects: ${projects.length}`;
         }
       } else {
         // Plain text format
         if (view === 'detailed') {
           output = 'Sentry Projects:\n\n';
-          
+
           for (const project of projects) {
             output += `ID: ${project.id}\n`;
             output += `Name: ${project.name}\n`;
@@ -106,15 +105,15 @@ server.tool(
             output += `Environments: ${project.environments?.join(', ') || 'None'}\n`;
             output += `Features: ${project.features?.join(', ') || 'None'}\n\n`;
           }
-          
+
           output += `Total Projects: ${projects.length}`;
         } else {
           output = 'Sentry Projects:\n\n';
-          
+
           for (const project of projects) {
             output += `${project.name} (${project.slug}): ID ${project.id}\n`;
           }
-          
+
           output += `\nTotal Projects: ${projects.length}`;
         }
       }
@@ -127,6 +126,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -140,16 +140,16 @@ server.tool(
 
 server.tool(
   "resolve_short_id",
-  "Retrieve details about an issue using its short ID. This tool helps you:\n            - Convert short IDs to full issue details\n            - Get project and organization context for an issue\n            - View issue metadata and status information\n            - Access issue permalinks and related information",
+  "Retrieve details about an issue using its short ID. This tool helps you convert short IDs to full issue details, get project and organization context for an issue, view issue metadata and status information, and access issue permalinks and related information",
   {
     organization_slug: z.string().describe("The slug of the organization the issue belongs to"),
     short_id: z.string().describe("The short ID of the issue to resolve (e.g., PROJECT-123)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, short_id, format }: { 
-    organization_slug: string; 
-    short_id: string; 
-    format: "plain" | "markdown" 
+  async ({ organization_slug, short_id, format }: {
+    organization_slug: string;
+    short_id: string;
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -159,7 +159,7 @@ server.tool(
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organization_slug}/shortids/${short_id}/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -188,10 +188,10 @@ server.tool(
 
       // Format the output based on the format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         output = `# Issue Details: ${data.shortId}\n\n`;
-        
+
         // Issue information section
         output += `## Issue Information\n\n`;
         output += `- **Title**: ${data.group.title}\n`;
@@ -202,21 +202,21 @@ server.tool(
         output += `- **Event Count**: ${data.group.count}\n`;
         output += `- **User Count**: ${data.group.userCount}\n`;
         output += `- **Culprit**: ${data.group.culprit}\n`;
-        
+
         // Project information section
         output += `\n## Project Information\n\n`;
         output += `- **Project**: ${data.group.project.name} (${data.group.project.slug})\n`;
         output += `- **Project ID**: ${data.group.project.id}\n`;
         output += `- **Organization**: ${data.organizationSlug}\n`;
-        
+
         // Links section
         output += `\n## Links\n\n`;
         output += `- **Permalink**: [${data.group.permalink}](${data.group.permalink})\n`;
-        
+
       } else {
         // Plain text format
         output = `Issue Details: ${data.shortId}\n\n`;
-        
+
         // Issue information section
         output += `Issue Information:\n\n`;
         output += `Title: ${data.group.title}\n`;
@@ -227,13 +227,13 @@ server.tool(
         output += `Event Count: ${data.group.count}\n`;
         output += `User Count: ${data.group.userCount}\n`;
         output += `Culprit: ${data.group.culprit}\n`;
-        
+
         // Project information section
         output += `\nProject Information:\n\n`;
         output += `Project: ${data.group.project.name} (${data.group.project.slug})\n`;
         output += `Project ID: ${data.group.project.id}\n`;
         output += `Organization: ${data.organizationSlug}\n`;
-        
+
         // Links section
         output += `\nLinks:\n\n`;
         output += `Permalink: ${data.group.permalink}\n`;
@@ -260,18 +260,18 @@ server.tool(
 
 server.tool(
   "get_sentry_event",
-  "Retrieve and analyze a specific Sentry event from an issue. Requires:\n            1. Issue ID or URL (e.g., https://org-name.sentry.io/issues/123456 or just 123456)\n            2. Event ID (e.g., ab29e1067f214acb8ce89f3a03be25e8)",
+  "Retrieve and analyze a specific Sentry event from an issue. Requires an Issue ID or URL (e.g., https://org-name.sentry.io/issues/123456 or just 123456) and an Event ID (e.g., ab29e1067f214acb8ce89f3a03be25e8)",
   {
     issue_id_or_url: z.string().describe("Either a full Sentry issue URL or just the numeric issue ID"),
     event_id: z.string().describe("The specific event ID to retrieve"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ issue_id_or_url, event_id, view, format }: { 
-    issue_id_or_url: string; 
+  async ({ issue_id_or_url, event_id, view, format }: {
+    issue_id_or_url: string;
     event_id: string;
     view: "summary" | "detailed";
-    format: "plain" | "markdown" 
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -282,7 +282,7 @@ server.tool(
 
       // Extract organization slug from the issue URL if provided
       let organizationSlug = '';
-      
+
       if (issue_id_or_url.includes('sentry.io')) {
         // Parse the URL to extract organization slug
         const urlParts = issue_id_or_url.split('/');
@@ -302,16 +302,16 @@ server.tool(
             isError: true
           };
         }
-        
+
         organizationSlug = process.env.SENTRY_ORG;
       }
-      
+
       console.error('DEBUG: Organization slug:', organizationSlug);
       console.error('DEBUG: Issue ID:', issue_id_or_url);
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organizationSlug}/eventids/${event_id}/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -340,11 +340,12 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
-        output = `# Event Details: ${data.event.eventID}\n\n`;
-        
         if (view === 'detailed') {
+          // Create a detailed markdown view
+          output = `# Event Details: ${data.event.eventID}\n\n`;
+
           // Event information section
           output += `## Event Information\n\n`;
           output += `- **Title**: ${data.event.title || data.event.metadata.title}\n`;
@@ -353,7 +354,7 @@ server.tool(
           output += `- **Date Received**: ${data.event.dateReceived}\n`;
           output += `- **Size**: ${data.event.size} bytes\n`;
           output += `- **Type**: ${data.event.type}\n`;
-          
+
           // Tags section
           if (data.event.tags && data.event.tags.length > 0) {
             output += `\n## Tags\n\n`;
@@ -361,7 +362,7 @@ server.tool(
               output += `- **${tag.key}**: ${tag.value}\n`;
             }
           }
-          
+
           // User information section
           if (data.event.user) {
             output += `\n## User Information\n\n`;
@@ -371,14 +372,14 @@ server.tool(
             if (data.event.user.username) output += `- **Username**: ${data.event.user.username}\n`;
             if (data.event.user.ip_address) output += `- **IP Address**: ${data.event.user.ip_address}\n`;
           }
-          
+
           // Request information section
           const requestEntry = data.event.entries.find(entry => entry.type === 'request');
           if (requestEntry) {
             output += `\n## Request Information\n\n`;
             if (requestEntry.data.url) output += `- **URL**: ${requestEntry.data.url}\n`;
             if (requestEntry.data.method) output += `- **Method**: ${requestEntry.data.method}\n`;
-            
+
             if (requestEntry.data.headers && requestEntry.data.headers.length > 0) {
               output += `\n### Headers\n\n`;
               for (const [key, value] of requestEntry.data.headers) {
@@ -386,7 +387,7 @@ server.tool(
               }
             }
           }
-          
+
           // Context information
           if (data.event.context && Object.keys(data.event.context).length > 0) {
             output += `\n## Context\n\n`;
@@ -394,7 +395,7 @@ server.tool(
             output += JSON.stringify(data.event.context, null, 2);
             output += '\n```\n';
           }
-          
+
           // Project information section
           output += `\n## Project Information\n\n`;
           output += `- **Organization**: ${data.organizationSlug}\n`;
@@ -408,14 +409,14 @@ server.tool(
           output += `- **Date Created**: ${data.event.dateCreated}\n`;
           output += `- **Organization**: ${data.organizationSlug}\n`;
           output += `- **Project**: ${data.projectSlug}\n`;
-          
+
           // Add a few important tags if available
           const levelTag = data.event.tags.find(tag => tag.key === 'level');
           const releaseTag = data.event.tags.find(tag => tag.key === 'release');
-          
+
           if (levelTag) output += `- **Level**: ${levelTag.value}\n`;
           if (releaseTag) output += `- **Release**: ${releaseTag.value}\n`;
-          
+
           if (data.event.user) {
             output += `- **User**: ${data.event.user.email || data.event.user.username || data.event.user.id}\n`;
           }
@@ -423,7 +424,7 @@ server.tool(
       } else {
         // Plain text format
         output = `Event Details: ${data.event.eventID}\n\n`;
-        
+
         if (view === 'detailed') {
           // Event information section
           output += `Event Information:\n\n`;
@@ -433,15 +434,16 @@ server.tool(
           output += `Date Received: ${data.event.dateReceived}\n`;
           output += `Size: ${data.event.size} bytes\n`;
           output += `Type: ${data.event.type}\n`;
-          
+
           // Tags section
           if (data.event.tags && data.event.tags.length > 0) {
             output += `\nTags:\n\n`;
+
             for (const tag of data.event.tags) {
               output += `${tag.key}: ${tag.value}\n`;
             }
           }
-          
+
           // User information section
           if (data.event.user) {
             output += `\nUser Information:\n\n`;
@@ -451,14 +453,14 @@ server.tool(
             if (data.event.user.username) output += `Username: ${data.event.user.username}\n`;
             if (data.event.user.ip_address) output += `IP Address: ${data.event.user.ip_address}\n`;
           }
-          
+
           // Request information section
           const requestEntry = data.event.entries.find(entry => entry.type === 'request');
           if (requestEntry) {
             output += `\nRequest Information:\n\n`;
             if (requestEntry.data.url) output += `URL: ${requestEntry.data.url}\n`;
             if (requestEntry.data.method) output += `Method: ${requestEntry.data.method}\n`;
-            
+
             if (requestEntry.data.headers && requestEntry.data.headers.length > 0) {
               output += `\nHeaders:\n\n`;
               for (const [key, value] of requestEntry.data.headers) {
@@ -466,14 +468,14 @@ server.tool(
               }
             }
           }
-          
+
           // Context information
           if (data.event.context && Object.keys(data.event.context).length > 0) {
             output += `\nContext:\n\n`;
             output += JSON.stringify(data.event.context, null, 2);
             output += '\n';
           }
-          
+
           // Project information section
           output += `\nProject Information:\n\n`;
           output += `Organization: ${data.organizationSlug}\n`;
@@ -487,14 +489,14 @@ server.tool(
           output += `Date Created: ${data.event.dateCreated}\n`;
           output += `Organization: ${data.organizationSlug}\n`;
           output += `Project: ${data.projectSlug}\n`;
-          
+
           // Add a few important tags if available
           const levelTag = data.event.tags.find(tag => tag.key === 'level');
           const releaseTag = data.event.tags.find(tag => tag.key === 'release');
-          
+
           if (levelTag) output += `Level: ${levelTag.value}\n`;
           if (releaseTag) output += `Release: ${releaseTag.value}\n`;
-          
+
           if (data.event.user) {
             output += `User: ${data.event.user.email || data.event.user.username || data.event.user.id}\n`;
           }
@@ -509,6 +511,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -522,18 +525,18 @@ server.tool(
 
 server.tool(
   "list_error_events_in_project",
-  "List error events from a specific Sentry project. This tool helps you:\n            - View recent error events across your project\n            - Monitor error frequency and patterns\n            - Analyze error distributions by level and platform\n            - Track error occurrence timestamps",
+  "List error events from a specific Sentry project. This tool helps you, view recent error events across your project, monitor error frequency and patterns, analyze error distributions by level and platform, and track error occurrence timestamps",
   {
     organization_slug: z.string().describe("The slug of the organization the project belongs to"),
     project_slug: z.string().describe("The slug of the project to list events from"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, project_slug, view, format }: { 
-    organization_slug: string; 
+  async ({ organization_slug, project_slug, view, format }: {
+    organization_slug: string;
     project_slug: string;
     view: "summary" | "detailed";
-    format: "plain" | "markdown" 
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -544,7 +547,7 @@ server.tool(
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/projects/${organization_slug}/${project_slug}/events/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -573,19 +576,19 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown view
           output = `# Error Events for Project: ${project_slug}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this project.\n";
           } else {
             for (let i = 0; i < events.length; i++) {
               const event = events[i];
-              
-              output += `## Event ${i+1}: ${event.title}\n\n`;
+
+              output += `## Event ${i + 1}: ${event.title}\n\n`;
               output += `- **Event ID**: ${event.eventID}\n`;
               output += `- **Group ID**: ${event.groupID}\n`;
               output += `- **Date Created**: ${event.dateCreated}\n`;
@@ -593,18 +596,18 @@ server.tool(
               output += `- **Type**: ${event["event.type"]}\n`;
               output += `- **Location**: ${event.location}\n`;
               output += `- **Culprit**: ${event.culprit}\n`;
-              
+
               // Add tags section if there are tags
               if (event.tags && event.tags.length > 0) {
                 output += `\n### Tags\n\n`;
                 output += `| Key | Value |\n`;
                 output += `|-----|-------|\n`;
-                
+
                 for (const tag of event.tags) {
                   output += `| ${tag.key} | ${tag.value} |\n`;
                 }
               }
-              
+
               // Add user information if available
               if (event.user) {
                 output += `\n### User Information\n\n`;
@@ -613,10 +616,10 @@ server.tool(
                 if (event.user.username) output += `- **Username**: ${event.user.username}\n`;
                 if (event.user.ip_address) output += `- **IP Address**: ${event.user.ip_address}\n`;
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `## Summary\n\n`;
             output += `Total Events: ${events.length}\n`;
@@ -624,19 +627,19 @@ server.tool(
         } else {
           // Create a summary markdown list
           output = `# Error Events for Project: ${project_slug}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this project.\n";
           } else {
             for (const event of events) {
               const level = event.tags?.find(tag => tag.key === 'level')?.value || 'unknown';
               const environment = event.tags?.find(tag => tag.key === 'environment')?.value || 'unknown';
-              
+
               output += `- **${event.title}** (ID: ${event.eventID})\n`;
               output += `  - Level: ${level}, Environment: ${environment}, Platform: ${event.platform}\n`;
               output += `  - Date: ${event.dateCreated}\n\n`;
             }
-            
+
             output += `Total Events: ${events.length}`;
           }
         }
@@ -644,14 +647,14 @@ server.tool(
         // Plain text format
         if (view === 'detailed') {
           output = `Error Events for Project: ${project_slug}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this project.\n";
           } else {
             for (let i = 0; i < events.length; i++) {
               const event = events[i];
-              
-              output += `Event ${i+1}: ${event.title}\n\n`;
+
+              output += `Event ${i + 1}: ${event.title}\n\n`;
               output += `Event ID: ${event.eventID}\n`;
               output += `Group ID: ${event.groupID}\n`;
               output += `Date Created: ${event.dateCreated}\n`;
@@ -659,16 +662,16 @@ server.tool(
               output += `Type: ${event["event.type"]}\n`;
               output += `Location: ${event.location}\n`;
               output += `Culprit: ${event.culprit}\n`;
-              
+
               // Add tags section if there are tags
               if (event.tags && event.tags.length > 0) {
                 output += `\nTags:\n\n`;
-                
+
                 for (const tag of event.tags) {
                   output += `${tag.key}: ${tag.value}\n`;
                 }
               }
-              
+
               // Add user information if available
               if (event.user) {
                 output += `\nUser Information:\n\n`;
@@ -677,10 +680,10 @@ server.tool(
                 if (event.user.username) output += `Username: ${event.user.username}\n`;
                 if (event.user.ip_address) output += `IP Address: ${event.user.ip_address}\n`;
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `Summary:\n\n`;
             output += `Total Events: ${events.length}\n`;
@@ -688,19 +691,19 @@ server.tool(
         } else {
           // Create a summary plain text list
           output = `Error Events for Project: ${project_slug}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this project.\n";
           } else {
             for (const event of events) {
               const level = event.tags?.find(tag => tag.key === 'level')?.value || 'unknown';
               const environment = event.tags?.find(tag => tag.key === 'environment')?.value || 'unknown';
-              
+
               output += `${event.title} (ID: ${event.eventID})\n`;
               output += `Level: ${level}, Environment: ${environment}, Platform: ${event.platform}\n`;
               output += `Date: ${event.dateCreated}\n\n`;
             }
-            
+
             output += `Total Events: ${events.length}`;
           }
         }
@@ -714,6 +717,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -727,7 +731,7 @@ server.tool(
 
 server.tool(
   "create_project",
-  "Create a new project in Sentry. Use this tool when you need to:\n            - Create a new release for deployment tracking\n            - Associate commits with a release\n            - Track release adoption and stability\n            - Monitor release health metrics",
+  "Create a new project in Sentry. Use this tool when you need to create a new release for deployment tracking, associate commits with a release, track release adoption and stability, and monitor release health metrics",
   {
     organization_slug: z.string().describe("The slug of the organization to create the project in"),
     team_slug: z.string().describe("The slug of the team to associate the project with"),
@@ -736,13 +740,13 @@ server.tool(
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, team_slug, name, platform, view, format }: { 
+  async ({ organization_slug, team_slug, name, platform, view, format }: {
     organization_slug: string;
     team_slug: string;
     name: string;
     platform?: string;
     view: "summary" | "detailed";
-    format: "plain" | "markdown" 
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -755,17 +759,17 @@ server.tool(
 
       // Construct the URL for the Sentry API to create a project
       const apiUrl: string = `https://sentry.io/api/0/teams/${organization_slug}/${team_slug}/projects/`;
-      
+
       // Prepare the request body
       const requestBody: any = {
         name: name
       };
-      
+
       // Add platform if specified
       if (platform) {
         requestBody.platform = platform;
       }
-      
+
       // Make the API request to create the project
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -792,10 +796,10 @@ server.tool(
       // Parse the response
       const projectData: SentryProjectCreationResponse = await response.json();
       console.error('DEBUG: Created project data:', JSON.stringify(projectData, null, 2));
-      
+
       // Now fetch the client keys for the newly created project
       const keysApiUrl: string = `https://sentry.io/api/0/projects/${organization_slug}/${projectData.slug}/keys/`;
-      
+
       // Make the API request to get client keys
       const keysResponse = await fetch(keysApiUrl, {
         method: 'GET',
@@ -804,12 +808,12 @@ server.tool(
           'Content-Type': 'application/json'
         }
       });
-      
+
       // Check if the keys request was successful
       if (!keysResponse.ok) {
         const errorText: string = await keysResponse.text();
         console.error('DEBUG: Keys API request failed:', keysResponse.status, errorText);
-        
+
         // Still return project data but with a warning about keys
         let output: string = '';
         if (format === 'markdown') {
@@ -821,7 +825,7 @@ server.tool(
           output += `Warning: Failed to fetch client keys: ${keysResponse.status} ${keysResponse.statusText}\n\n`;
           // Add project details...
         }
-        
+
         // Return the output with warning
         return {
           content: [{
@@ -830,17 +834,17 @@ server.tool(
           }]
         };
       }
-      
+
       // Parse the keys response
       const clientKeys: SentryClientKey[] = await keysResponse.json();
       console.error('DEBUG: Client keys data:', JSON.stringify(clientKeys, null, 2));
-      
+
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         output = `# Project Created: ${projectData.name}\n\n`;
-        
+
         if (view === 'detailed') {
           // Project information section
           output += `## Project Information\n\n`;
@@ -850,24 +854,24 @@ server.tool(
           output += `- **Platform**: ${projectData.platform || 'Not specified'}\n`;
           output += `- **Date Created**: ${projectData.dateCreated}\n`;
           output += `- **Status**: ${projectData.status}\n`;
-          
+
           // Features section
           output += `\n## Features\n\n`;
           output += `- ${projectData.features.join('\n- ')}\n`;
-          
+
           // Client Keys section
           output += `\n## Client Keys\n\n`;
-          
+
           for (let i = 0; i < clientKeys.length; i++) {
             const key = clientKeys[i];
-            output += `### Key ${i+1}: ${key.name}\n\n`;
+            output += `### Key ${i + 1}: ${key.name}\n\n`;
             output += `- **ID**: ${key.id}\n`;
             output += `- **Public Key**: ${key.public}\n`;
             output += `- **Secret Key**: ${key.secret}\n`;
             output += `- **Project ID**: ${key.projectId}\n`;
             output += `- **Is Active**: ${key.isActive}\n`;
             output += `- **Date Created**: ${key.dateCreated}\n\n`;
-            
+
             output += `#### DSN Information\n\n`;
             output += `- **Public DSN**: \`${key.dsn.public}\`\n`;
             output += `- **Secret DSN**: \`${key.dsn.secret}\`\n`;
@@ -876,7 +880,7 @@ server.tool(
             output += `- **Minidump Endpoint**: \`${key.dsn.minidump}\`\n`;
             output += `- **CDN URL**: \`${key.dsn.cdn}\`\n\n`;
           }
-          
+
         } else {
           // Summary view
           output += `## Project Summary\n\n`;
@@ -884,19 +888,19 @@ server.tool(
           output += `- **Name**: ${projectData.name}\n`;
           output += `- **Slug**: ${projectData.slug}\n`;
           output += `- **Platform**: ${projectData.platform || 'Not specified'}\n\n`;
-          
+
           output += `## Client Keys Summary\n\n`;
-          
+
           for (let i = 0; i < clientKeys.length; i++) {
             const key = clientKeys[i];
-            output += `### Key ${i+1}: ${key.name}\n\n`;
+            output += `### Key ${i + 1}: ${key.name}\n\n`;
             output += `- **Public DSN**: \`${key.dsn.public}\`\n\n`;
           }
         }
       } else {
         // Plain text format
         output = `Project Created: ${projectData.name}\n\n`;
-        
+
         if (view === 'detailed') {
           // Project information section
           output += `Project Information:\n\n`;
@@ -906,26 +910,26 @@ server.tool(
           output += `Platform: ${projectData.platform || 'Not specified'}\n`;
           output += `Date Created: ${projectData.dateCreated}\n`;
           output += `Status: ${projectData.status}\n`;
-          
+
           // Features section
           output += `\nFeatures:\n\n`;
           for (const feature of projectData.features) {
             output += `- ${feature}\n`;
           }
-          
+
           // Client Keys section
           output += `\nClient Keys:\n\n`;
-          
+
           for (let i = 0; i < clientKeys.length; i++) {
             const key = clientKeys[i];
-            output += `Key ${i+1}: ${key.name}\n\n`;
+            output += `Key ${i + 1}: ${key.name}\n\n`;
             output += `ID: ${key.id}\n`;
             output += `Public Key: ${key.public}\n`;
             output += `Secret Key: ${key.secret}\n`;
             output += `Project ID: ${key.projectId}\n`;
             output += `Is Active: ${key.isActive}\n`;
             output += `Date Created: ${key.dateCreated}\n\n`;
-            
+
             output += `DSN Information:\n\n`;
             output += `Public DSN: ${key.dsn.public}\n`;
             output += `Secret DSN: ${key.dsn.secret}\n`;
@@ -941,12 +945,12 @@ server.tool(
           output += `Name: ${projectData.name}\n`;
           output += `Slug: ${projectData.slug}\n`;
           output += `Platform: ${projectData.platform || 'Not specified'}\n\n`;
-          
+
           output += `Client Keys Summary:\n\n`;
-          
+
           for (let i = 0; i < clientKeys.length; i++) {
             const key = clientKeys[i];
-            output += `Key ${i+1}: ${key.name}\n\n`;
+            output += `Key ${i + 1}: ${key.name}\n\n`;
             output += `Public DSN: ${key.dsn.public}\n\n`;
           }
         }
@@ -960,6 +964,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -973,18 +978,18 @@ server.tool(
 
 server.tool(
   "list_project_issues",
-  "List issues from a specific Sentry project. This tool helps you:\n            - View all issues in your project\n            - Monitor issue status and severity\n            - Track issue frequency and timing\n            - Get issue IDs for use with other tools\n            \n            The output is formatted as a markdown table by default, making it easy to:\n            1. Copy issue IDs for use with other tools\n            2. Sort and filter issues\n            3. Share issue summaries",
+  "List issues from a specific Sentry project. This tool helps you, view all issues in your project, monitor issue status and severity, track issue frequency and timing, and get issue IDs for use with other tools. The output is formatted as a markdown table by default, making it easy to copy issue IDs for use with other tools, sort and filter issues, and share issue summaries.",
   {
     organization_slug: z.string().describe("The slug of the organization the project belongs to"),
     project_slug: z.string().describe("The slug of the project to list issues from"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, project_slug, view, format }: { 
-    organization_slug: string; 
+  async ({ organization_slug, project_slug, view, format }: {
+    organization_slug: string;
     project_slug: string;
     view: "summary" | "detailed";
-    format: "plain" | "markdown" 
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -995,7 +1000,7 @@ server.tool(
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/projects/${organization_slug}/${project_slug}/issues/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -1024,30 +1029,30 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown view
           output = `# Issues for Project: ${project_slug}\n\n`;
-          
+
           if (issues.length === 0) {
             output += "No issues found for this project.\n";
           } else {
             // Create a table for the issues
             output += `| ID | Short ID | Title | Status | Level | First Seen | Last Seen | Events | Users |\n`;
             output += `|----|----------|-------|--------|-------|------------|-----------|--------|-------|\n`;
-            
+
             for (const issue of issues) {
               output += `| ${issue.id} | ${issue.shortId} | ${issue.title} | ${issue.status} | ${issue.level} | ${issue.firstSeen} | ${issue.lastSeen} | ${issue.count} | ${issue.userCount} |\n`;
             }
-            
+
             // Add detailed information for each issue
             output += `\n## Issue Details\n\n`;
-            
+
             for (let i = 0; i < issues.length; i++) {
               const issue = issues[i];
-              
-              output += `### Issue ${i+1}: ${issue.title}\n\n`;
+
+              output += `### Issue ${i + 1}: ${issue.title}\n\n`;
               output += `- **ID**: ${issue.id}\n`;
               output += `- **Short ID**: ${issue.shortId}\n`;
               output += `- **Status**: ${issue.status}\n`;
@@ -1057,23 +1062,22 @@ server.tool(
               output += `- **Event Count**: ${issue.count}\n`;
               output += `- **User Count**: ${issue.userCount}\n`;
               output += `- **Culprit**: ${issue.culprit}\n`;
-              output += `- **Permalink**: [${issue.permalink}](${issue.permalink})\n`;
-              
+
               // Add 24h stats if available
               if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
                 output += `\n#### 24-Hour Event Distribution\n\n`;
                 output += `| Timestamp | Count |\n`;
                 output += `|-----------|-------|\n`;
-                
+
                 for (const [timestamp, count] of issue.stats["24h"]) {
                   const date = new Date(timestamp * 1000);
                   output += `| ${date.toISOString()} | ${count} |\n`;
                 }
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `## Summary\n\n`;
             output += `Total Issues: ${issues.length}\n`;
@@ -1081,7 +1085,7 @@ server.tool(
         } else {
           // Create a summary markdown list
           output = `# Issues for Project: ${project_slug}\n\n`;
-          
+
           if (issues.length === 0) {
             output += "No issues found for this project.\n";
           } else {
@@ -1090,7 +1094,7 @@ server.tool(
               output += `  - Status: ${issue.status}, Level: ${issue.level}, Events: ${issue.count}\n`;
               output += `  - First seen: ${issue.firstSeen}, Last seen: ${issue.lastSeen}\n\n`;
             }
-            
+
             output += `Total Issues: ${issues.length}`;
           }
         }
@@ -1098,14 +1102,14 @@ server.tool(
         // Plain text format
         if (view === 'detailed') {
           output = `Issues for Project: ${project_slug}\n\n`;
-          
+
           if (issues.length === 0) {
             output += "No issues found for this project.\n";
           } else {
             for (let i = 0; i < issues.length; i++) {
               const issue = issues[i];
-              
-              output += `Issue ${i+1}: ${issue.title}\n\n`;
+
+              output += `Issue ${i + 1}: ${issue.title}\n\n`;
               output += `ID: ${issue.id}\n`;
               output += `Short ID: ${issue.shortId}\n`;
               output += `Status: ${issue.status}\n`;
@@ -1115,21 +1119,20 @@ server.tool(
               output += `Event Count: ${issue.count}\n`;
               output += `User Count: ${issue.userCount}\n`;
               output += `Culprit: ${issue.culprit}\n`;
-              output += `Permalink: ${issue.permalink}\n`;
-              
+
               // Add 24h stats if available
               if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
                 output += `\n24-Hour Event Distribution:\n\n`;
-                
+
                 for (const [timestamp, count] of issue.stats["24h"]) {
                   const date = new Date(timestamp * 1000);
                   output += `${date.toISOString()}: ${count}\n`;
                 }
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `Summary:\n\n`;
             output += `Total Issues: ${issues.length}\n`;
@@ -1137,7 +1140,7 @@ server.tool(
         } else {
           // Create a summary plain text list
           output = `Issues for Project: ${project_slug}\n\n`;
-          
+
           if (issues.length === 0) {
             output += "No issues found for this project.\n";
           } else {
@@ -1146,7 +1149,7 @@ server.tool(
               output += `Status: ${issue.status}, Level: ${issue.level}, Events: ${issue.count}\n`;
               output += `First seen: ${issue.firstSeen}, Last seen: ${issue.lastSeen}\n\n`;
             }
-            
+
             output += `Total Issues: ${issues.length}`;
           }
         }
@@ -1160,6 +1163,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -1173,18 +1177,18 @@ server.tool(
 
 server.tool(
   "list_issue_events",
-  "List events for a specific Sentry issue. This tool helps you:\n            - View all events associated with an issue\n            - Analyze event details and metadata\n            - Track event frequency and timing\n            - Identify patterns across related events",
+  "List events for a specific Sentry issue. This tool helps you, view all events associated with an issue, analyze event details and metadata, track event frequency and timing, and identify patterns across related events.",
   {
     organization_slug: z.string().describe("The slug of the organization the issue belongs to"),
     issue_id: z.string().describe("The ID of the issue to list events for"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ organization_slug, issue_id, view, format }: { 
-    organization_slug: string; 
+  async ({ organization_slug, issue_id, view, format }: {
+    organization_slug: string;
     issue_id: string;
     view: "summary" | "detailed";
-    format: "plain" | "markdown" 
+    format: "plain" | "markdown"
   }) => {
     try {
       // Debug input
@@ -1195,7 +1199,7 @@ server.tool(
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organization_slug}/issues/${issue_id}/events/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -1224,30 +1228,30 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown view
           output = `# Events for Issue: ${issue_id}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this issue.\n";
           } else {
             // Create a table for the events
             output += `| Event ID | Title | Platform | Date Created | Location | Culprit |\n`;
             output += `|----------|-------|----------|--------------|----------|----------|\n`;
-            
+
             for (const event of events) {
               output += `| ${event.eventID} | ${event.title} | ${event.platform} | ${event.dateCreated} | ${event.location || 'N/A'} | ${event.culprit || 'N/A'} |\n`;
             }
-            
+
             // Add detailed information for each event
             output += `\n## Event Details\n\n`;
-            
+
             for (let i = 0; i < events.length; i++) {
               const event = events[i];
-              
-              output += `### Event ${i+1}: ${event.title}\n\n`;
+
+              output += `### Event ${i + 1}: ${event.title}\n\n`;
               output += `- **Event ID**: ${event.eventID}\n`;
               output += `- **Group ID**: ${event.groupID}\n`;
               output += `- **Date Created**: ${event.dateCreated}\n`;
@@ -1256,18 +1260,18 @@ server.tool(
               output += `- **Location**: ${event.location || 'N/A'}\n`;
               output += `- **Culprit**: ${event.culprit || 'N/A'}\n`;
               output += `- **Project ID**: ${event.projectID}\n`;
-              
+
               // Add tags section if there are tags
               if (event.tags && event.tags.length > 0) {
                 output += `\n#### Tags\n\n`;
                 output += `| Key | Value |\n`;
                 output += `|-----|-------|\n`;
-                
+
                 for (const tag of event.tags) {
                   output += `| ${tag.key} | ${tag.value} |\n`;
                 }
               }
-              
+
               // Add user information if available
               if (event.user) {
                 output += `\n#### User Information\n\n`;
@@ -1276,10 +1280,10 @@ server.tool(
                 if (event.user.username) output += `- **Username**: ${event.user.username}\n`;
                 if (event.user.ip_address) output += `- **IP Address**: ${event.user.ip_address}\n`;
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `## Summary\n\n`;
             output += `Total Events: ${events.length}\n`;
@@ -1287,20 +1291,20 @@ server.tool(
         } else {
           // Create a summary markdown list
           output = `# Events for Issue: ${issue_id}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this issue.\n";
           } else {
             for (const event of events) {
               const level = event.tags?.find(tag => tag.key === 'level')?.value || 'unknown';
               const environment = event.tags?.find(tag => tag.key === 'environment')?.value || 'unknown';
-              
+
               output += `- **Event ID**: ${event.eventID}\n`;
               output += `  - Title: ${event.title}\n`;
               output += `  - Level: ${level}, Environment: ${environment}, Platform: ${event.platform}\n`;
               output += `  - Date: ${event.dateCreated}\n\n`;
             }
-            
+
             output += `Total Events: ${events.length}`;
           }
         }
@@ -1308,14 +1312,14 @@ server.tool(
         // Plain text format
         if (view === 'detailed') {
           output = `Events for Issue: ${issue_id}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this issue.\n";
           } else {
             for (let i = 0; i < events.length; i++) {
               const event = events[i];
-              
-              output += `Event ${i+1}: ${event.title}\n\n`;
+
+              output += `Event ${i + 1}: ${event.title}\n\n`;
               output += `Event ID: ${event.eventID}\n`;
               output += `Group ID: ${event.groupID}\n`;
               output += `Date Created: ${event.dateCreated}\n`;
@@ -1324,16 +1328,16 @@ server.tool(
               output += `Location: ${event.location || 'N/A'}\n`;
               output += `Culprit: ${event.culprit || 'N/A'}\n`;
               output += `Project ID: ${event.projectID}\n`;
-              
+
               // Add tags section if there are tags
               if (event.tags && event.tags.length > 0) {
                 output += `\nTags:\n\n`;
-                
+
                 for (const tag of event.tags) {
                   output += `${tag.key}: ${tag.value}\n`;
                 }
               }
-              
+
               // Add user information if available
               if (event.user) {
                 output += `\nUser Information:\n\n`;
@@ -1342,10 +1346,10 @@ server.tool(
                 if (event.user.username) output += `Username: ${event.user.username}\n`;
                 if (event.user.ip_address) output += `IP Address: ${event.user.ip_address}\n`;
               }
-              
+
               output += `\n---\n\n`;
             }
-            
+
             // Add summary information
             output += `Summary:\n\n`;
             output += `Total Events: ${events.length}\n`;
@@ -1353,20 +1357,20 @@ server.tool(
         } else {
           // Create a summary plain text list
           output = `Events for Issue: ${issue_id}\n\n`;
-          
+
           if (events.length === 0) {
             output += "No events found for this issue.\n";
           } else {
             for (const event of events) {
               const level = event.tags?.find(tag => tag.key === 'level')?.value || 'unknown';
               const environment = event.tags?.find(tag => tag.key === 'environment')?.value || 'unknown';
-              
+
               output += `Event ID: ${event.eventID}\n`;
               output += `Title: ${event.title}\n`;
               output += `Level: ${level}, Environment: ${environment}, Platform: ${event.platform}\n`;
               output += `Date: ${event.dateCreated}\n\n`;
             }
-            
+
             output += `Total Events: ${events.length}`;
           }
         }
@@ -1380,6 +1384,7 @@ server.tool(
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -1393,31 +1398,29 @@ server.tool(
 
 server.tool(
   "get_sentry_issue",
-  "Retrieve and analyze a Sentry issue. Accepts either:\n            1. A full Sentry issue URL (e.g., https://org-name.sentry.io/issues/123456)\n            2. Just the issue ID (e.g., 123456)",
+  "Retrieve and analyze a Sentry issue. Accepts either a full Sentry issue URL (e.g., https://org-name.sentry.io/issues/123456) or just the issue ID (e.g., 123456).",
   {
     issue_id_or_url: z.string().describe("Either a full Sentry issue URL or just the numeric issue ID"),
+    organization_slug: z.string().optional().describe("Optional organization slug (default: SENTRY_ORG environment variable)"),
     view: z.enum(["summary", "detailed"]).default("detailed").describe("View type (default: detailed)"),
     format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
   },
-  async ({ issue_id_or_url, view, format }: { 
-    issue_id_or_url: string;
-    view: "summary" | "detailed";
-    format: "plain" | "markdown" 
-  }) => {
+  async ({ issue_id_or_url, organization_slug, view, format }, extra) => {
     try {
       // Debug input
       console.error('DEBUG: Retrieving issue:', issue_id_or_url);
+      console.error('DEBUG: Organization slug (optional):', organization_slug);
       console.error('DEBUG: View:', view);
       console.error('DEBUG: Format:', format);
 
       // Parse the issue ID from URL if provided
-      let organizationSlug = '';
-      
+      let organizationSlug = organization_slug ?? process.env.SENTRY_ORG;
+
       if (issue_id_or_url.startsWith('http')) {
         // Extract organization slug and issue ID from URL
         const urlPattern = /https:\/\/([\w-]+)\.sentry\.io\/(?:organizations\/)?([\w-]+)?(?:\/)?(?:issues\/)?(\d+)/;
         const match = issue_id_or_url.match(urlPattern);
-        
+
         if (!match) {
           return {
             content: [{
@@ -1427,31 +1430,19 @@ server.tool(
             isError: true
           };
         }
-        
+
         organizationSlug = match[1];
         issue_id_or_url = match[3];
       } else {
         // Assume issue_id_or_url is just the issue ID
-        // We need to determine the organization from environment variables or other means
-        if (!process.env.SENTRY_ORG) {
-          return {
-            content: [{
-              type: "text",
-              text: `When providing just an issue ID, the SENTRY_ORG environment variable must be set to specify the organization.`
-            }],
-            isError: true
-          };
-        }
-        
-        organizationSlug = process.env.SENTRY_ORG;
       }
-      
+
       console.error('DEBUG: Organization slug:', organizationSlug);
       console.error('DEBUG: Issue ID:', issue_id_or_url);
 
       // Construct the URL for the Sentry API
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organizationSlug}/issues/${issue_id_or_url}/`;
-      
+
       // Make the API request
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -1480,12 +1471,12 @@ server.tool(
 
       // Format the output based on the view type and format
       let output: string = '';
-      
+
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown view
           output = `# Issue: ${issue.title}\n\n`;
-          
+
           // Basic issue information
           output += `## Overview\n\n`;
           output += `- **ID**: ${issue.id}\n`;
@@ -1498,13 +1489,13 @@ server.tool(
           output += `- **User Count**: ${issue.userCount}\n`;
           output += `- **Culprit**: ${issue.culprit}\n`;
           output += `- **Permalink**: [${issue.permalink}](${issue.permalink})\n`;
-          
+
           // Project information
           output += `\n## Project\n\n`;
           output += `- **Name**: ${issue.project.name}\n`;
           output += `- **ID**: ${issue.project.id}\n`;
           output += `- **Slug**: ${issue.project.slug}\n`;
-          
+
           // Release information if available
           if (issue.firstRelease) {
             output += `\n## First Release\n\n`;
@@ -1513,7 +1504,7 @@ server.tool(
             output += `- **Date Created**: ${issue.firstRelease.dateCreated}\n`;
             output += `- **First Event**: ${issue.firstRelease.firstEvent}\n`;
             output += `- **Last Event**: ${issue.firstRelease.lastEvent}\n`;
-            
+
             if (issue.firstRelease.projects && issue.firstRelease.projects.length > 0) {
               output += `- **Projects**:\n`;
               for (const project of issue.firstRelease.projects) {
@@ -1521,48 +1512,48 @@ server.tool(
               }
             }
           }
-          
+
           // Activity information
           if (issue.activity && issue.activity.length > 0) {
             output += `\n## Activity\n\n`;
             output += `| Type | Date | User |\n`;
             output += `|------|------|------|\n`;
-            
+
             for (const activity of issue.activity) {
               const user = activity.user ? activity.user.name : 'System';
               output += `| ${activity.type} | ${activity.dateCreated} | ${user} |\n`;
             }
           }
-          
+
           // Tags if available
           if (issue.tags && issue.tags.length > 0) {
             output += `\n## Tags\n\n`;
             output += `| Key | Value |\n`;
             output += `|-----|-------|\n`;
-            
+
             for (const tag of issue.tags) {
               output += `| ${tag.key} | ${tag.value} |\n`;
             }
           }
-          
+
           // 24h stats
           if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
             output += `\n## 24-Hour Event Distribution\n\n`;
             output += `| Timestamp | Count |\n`;
             output += `|-----------|-------|\n`;
-            
+
             for (const [timestamp, count] of issue.stats["24h"]) {
               const date = new Date(timestamp * 1000);
               output += `| ${date.toISOString()} | ${count} |\n`;
             }
           }
-          
+
           // 30d stats
           if (issue.stats && issue.stats["30d"] && issue.stats["30d"].length > 0) {
             output += `\n## 30-Day Event Distribution\n\n`;
             output += `| Date | Count |\n`;
             output += `|------|-------|\n`;
-            
+
             for (const [timestamp, count] of issue.stats["30d"]) {
               const date = new Date(timestamp * 1000);
               output += `| ${date.toISOString().split('T')[0]} | ${count} |\n`;
@@ -1571,29 +1562,29 @@ server.tool(
         } else {
           // Create a summary markdown view
           output = `# Issue: ${issue.title}\n\n`;
-          
+
           output += `**Short ID**: ${issue.shortId}\n`;
           output += `**Status**: ${issue.status}, **Level**: ${issue.level}\n`;
           output += `**First Seen**: ${issue.firstSeen}, **Last Seen**: ${issue.lastSeen}\n`;
           output += `**Events**: ${issue.count}, **Users Affected**: ${issue.userCount}\n`;
           output += `**Project**: ${issue.project.name}\n`;
           output += `**Permalink**: [${issue.permalink}](${issue.permalink})\n`;
-          
+
           // Include a small 24h chart summary
           if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
             let total24h = 0;
             for (const [_, count] of issue.stats["24h"]) {
               total24h += count;
             }
-            
+
             output += `\n**24-Hour Event Count**: ${total24h}\n`;
           }
         }
       } else {
         // Plain text format
         if (view === 'detailed') {
-          output = `Issue: ${issue.title}\n\n`;
-          
+          output += `Issue: ${issue.title}\n\n`;
+
           // Basic issue information
           output += `Overview:\n\n`;
           output += `ID: ${issue.id}\n`;
@@ -1606,13 +1597,14 @@ server.tool(
           output += `User Count: ${issue.userCount}\n`;
           output += `Culprit: ${issue.culprit}\n`;
           output += `Permalink: ${issue.permalink}\n`;
-          
+
           // Project information
           output += `\nProject:\n\n`;
+
           output += `Name: ${issue.project.name}\n`;
           output += `ID: ${issue.project.id}\n`;
           output += `Slug: ${issue.project.slug}\n`;
-          
+
           // Release information if available
           if (issue.firstRelease) {
             output += `\nFirst Release:\n\n`;
@@ -1621,71 +1613,79 @@ server.tool(
             output += `Date Created: ${issue.firstRelease.dateCreated}\n`;
             output += `First Event: ${issue.firstRelease.firstEvent}\n`;
             output += `Last Event: ${issue.firstRelease.lastEvent}\n`;
-            
+
             if (issue.firstRelease.projects && issue.firstRelease.projects.length > 0) {
               output += `Projects:\n`;
               for (const project of issue.firstRelease.projects) {
-                output += `- ${project.name} (${project.slug})\n`;
+                output += `  - ${project.name} (${project.slug})\n`;
               }
             }
           }
-          
+
           // Activity information
           if (issue.activity && issue.activity.length > 0) {
             output += `\nActivity:\n\n`;
-            
+            output += `Type | Date | User\n`;
+            output += `------|------|------\n`;
+
             for (const activity of issue.activity) {
               const user = activity.user ? activity.user.name : 'System';
-              output += `Type: ${activity.type}, Date: ${activity.dateCreated}, User: ${user}\n`;
+              output += `${activity.type} | ${activity.dateCreated} | ${user}\n`;
             }
           }
-          
+
           // Tags if available
           if (issue.tags && issue.tags.length > 0) {
             output += `\nTags:\n\n`;
-            
+            output += `Key | Value\n`;
+            output += `-----|-------\n`;
+
             for (const tag of issue.tags) {
-              output += `${tag.key}: ${tag.value}\n`;
+              output += `${tag.key} | ${tag.value}\n`;
             }
           }
-          
+
           // 24h stats
           if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
             output += `\n24-Hour Event Distribution:\n\n`;
-            
+            output += `Timestamp | Count\n`;
+            output += `-----------|-------\n`;
+
             for (const [timestamp, count] of issue.stats["24h"]) {
               const date = new Date(timestamp * 1000);
-              output += `${date.toISOString()}: ${count}\n`;
+              output += `${date.toISOString()} | ${count}\n`;
             }
           }
-          
+
           // 30d stats
           if (issue.stats && issue.stats["30d"] && issue.stats["30d"].length > 0) {
             output += `\n30-Day Event Distribution:\n\n`;
-            
+            output += `Date | Count\n`;
+            output += `------|-------\n`;
+
             for (const [timestamp, count] of issue.stats["30d"]) {
               const date = new Date(timestamp * 1000);
-              output += `${date.toISOString().split('T')[0]}: ${count}\n`;
+              output += `${date.toISOString().split('T')[0]} | ${count}\n`;
             }
           }
         } else {
           // Create a summary plain text view
           output = `Issue: ${issue.title}\n\n`;
-          
+
           output += `Short ID: ${issue.shortId}\n`;
           output += `Status: ${issue.status}, Level: ${issue.level}\n`;
           output += `First Seen: ${issue.firstSeen}, Last Seen: ${issue.lastSeen}\n`;
           output += `Events: ${issue.count}, Users Affected: ${issue.userCount}\n`;
           output += `Project: ${issue.project.name}\n`;
           output += `Permalink: ${issue.permalink}\n`;
-          
+
           // Include a small 24h chart summary
           if (issue.stats && issue.stats["24h"] && issue.stats["24h"].length > 0) {
             let total24h = 0;
             for (const [_, count] of issue.stats["24h"]) {
               total24h += count;
             }
-            
+
             output += `\n24-Hour Event Count: ${total24h}\n`;
           }
         }
@@ -1695,10 +1695,12 @@ server.tool(
         content: [{
           type: "text",
           text: output
-        }]
+        }],
+        isError: false
       };
     } catch (error: any) {
       console.error('DEBUG: Caught error:', error);
+      Sentry.captureException(error);
       return {
         content: [{
           type: "text",
@@ -1712,7 +1714,7 @@ server.tool(
 
 server.tool(
   "list_organization_replays",
-  "List replays from a specific Sentry organization. This tool helps you:\n            - View all replays in your organization\n            - Monitor user interactions and errors\n            - Track replay frequency and timing\n            - Identify user experience issues like rage clicks and dead clicks\n            \n            The output is formatted as a markdown table by default, making it easy to:\n            1. Copy replay IDs for use with other tools\n            2. Sort and filter replays\n            3. Share replay summaries",
+  "List replays from a specific Sentry organization. This tool helps you, View all replays in your organization, Monitor user interactions and errors, Track replay frequency and timing, Identify user experience issues like rage clicks and dead clicks, The output is formatted as a markdown table by default, making it easy to: 1. Copy replay IDs for use with other tools, 2. Sort and filter replays, 3. Share replay summaries",
   {
     organization_slug: z.string().describe("The slug of the organization to list replays from"),
     project_ids: z.array(z.string()).optional().describe("Optional array of project IDs to filter replays by"),
@@ -1739,7 +1741,7 @@ server.tool(
 
       // Build query parameters
       const queryParams = new URLSearchParams();
-      
+
       // Add time range parameters
       if (stats_period) {
         queryParams.append('statsPeriod', stats_period);
@@ -1747,36 +1749,36 @@ server.tool(
         queryParams.append('start', start);
         queryParams.append('end', end);
       }
-      
+
       // Add project filter if provided
       if (project_ids && project_ids.length > 0) {
         project_ids.forEach(id => queryParams.append('project', id));
       }
-      
+
       // Add environment filter if provided
       if (environment) {
         queryParams.append('environment', environment);
       }
-      
+
       // Add sort parameter if provided
       if (sort) {
         queryParams.append('sort', sort);
       }
-      
+
       // Add query filter if provided
       if (query) {
         queryParams.append('query', query);
       }
-      
+
       // Add pagination parameters if provided
       if (per_page) {
         queryParams.append('per_page', per_page.toString());
       }
-      
+
       if (cursor) {
         queryParams.append('cursor', cursor);
       }
-      
+
       // Add fields parameter to get all relevant fields
       const fields = [
         'activity', 'browser', 'count_dead_clicks', 'count_errors', 'count_rage_clicks',
@@ -1785,13 +1787,13 @@ server.tool(
         'releases', 'sdk', 'started_at', 'tags', 'trace_ids', 'urls', 'user',
         'clicks', 'info_ids', 'warning_ids', 'count_warnings', 'count_infos', 'has_viewed'
       ];
-      
+
       fields.forEach(field => queryParams.append('field', field));
-      
+
       // Build the URL with query parameters
       const queryString = queryParams.toString();
       const url = `https://sentry.io/api/0/organizations/${organization_slug}/replays/${queryString ? `?${queryString}` : ''}`;
-      
+
       console.error('DEBUG: Request URL:', url);
 
       // Fetch replays from the Sentry API
@@ -1814,7 +1816,7 @@ server.tool(
       console.error('DEBUG: Found replays:', replays.length);
 
       let output = '';
-      
+
       // Add filter information to output
       const filterInfo: string[] = [];
       if (project_ids && project_ids.length > 0) {
@@ -1828,41 +1830,41 @@ server.tool(
       } else if (start && end) {
         filterInfo.push(`Time Range: ${start} to ${end}`);
       }
-      
+
       const filterText = filterInfo.length > 0 ? ` (Filtered by: ${filterInfo.join(' | ')})` : '';
 
       if (format === 'markdown') {
         if (view === 'detailed') {
           // Create a detailed markdown view
           output = `# Replays for Organization: ${organization_slug}${filterText}\n\n`;
-          
+
           // Summary table
           output += `## Summary\n\n`;
           output += `| ID | Project ID | Started | Duration | Browser | Platform | Environment | Errors |\n`;
           output += `|:---|:-----------|:--------|:---------|:--------|:---------|:------------|:-------|\n`;
-          
+
           for (const replay of replays) {
             const startedDate = new Date(replay.started_at).toLocaleString();
             const duration = `${Math.floor(replay.duration / 60)}m ${replay.duration % 60}s`;
             const browser = replay.browser ? `${replay.browser.name} ${replay.browser.version}` : 'N/A';
-            
+
             output += `| ${replay.id} | ${replay.project_id} | ${startedDate} | ${duration} | ${browser} | ${replay.platform} | ${replay.environment} | ${replay.count_errors} |\n`;
           }
-          
+
           // Pagination information if cursor is provided
           if (cursor) {
             output += `\n*Note: This is a paginated result. Use the cursor parameter for the next page.*\n\n`;
           }
-          
+
           output += `\n## Replay Details\n\n`;
-          
+
           for (let i = 0; i < replays.length; i++) {
             const replay = replays[i];
             const startedDate = new Date(replay.started_at).toLocaleString();
             const finishedDate = replay.finished_at ? new Date(replay.finished_at).toLocaleString() : 'N/A';
             const duration = `${Math.floor(replay.duration / 60)}m ${replay.duration % 60}s`;
-            
-            output += `### Replay ${i+1}: ${replay.id}\n\n`;
+
+            output += `### Replay ${i + 1}: ${replay.id}\n\n`;
             output += `- **Project ID**: ${replay.project_id}\n`;
             output += `- **Started**: ${startedDate}\n`;
             output += `- **Finished**: ${finishedDate}\n`;
@@ -1871,35 +1873,35 @@ server.tool(
             output += `- **Platform**: ${replay.platform}\n`;
             output += `- **Activity**: ${replay.activity}\n`;
             output += `- **Viewed**: ${replay.has_viewed ? 'Yes' : 'No'}\n`;
-            
+
             // User information if available
             if (replay.user) {
               output += `- **User**: ${replay.user.display_name || replay.user.username} (${replay.user.email})\n`;
             }
-            
+
             // Browser information if available
             if (replay.browser) {
               output += `- **Browser**: ${replay.browser.name} ${replay.browser.version}\n`;
             }
-            
+
             // OS information if available
             if (replay.os) {
               output += `- **OS**: ${replay.os.name} ${replay.os.version}\n`;
             }
-            
+
             // Device information if available
             if (replay.device) {
               output += `- **Device**: ${replay.device.name} (${replay.device.brand} ${replay.device.model})\n`;
             }
-            
+
             // SDK information
             output += `- **SDK**: ${replay.sdk.name} ${replay.sdk.version}\n`;
-            
+
             // Interaction metrics
             output += `- **Dead Clicks**: ${replay.count_dead_clicks}\n`;
             output += `- **Rage Clicks**: ${replay.count_rage_clicks}\n`;
             output += `- **Errors**: ${replay.count_errors}\n`;
-            
+
             // Include warnings and infos if available
             if ('count_warnings' in replay) {
               output += `- **Warnings**: ${(replay as any).count_warnings}\n`;
@@ -1907,9 +1909,9 @@ server.tool(
             if ('count_infos' in replay) {
               output += `- **Infos**: ${(replay as any).count_infos}\n`;
             }
-            
+
             output += `- **URLs Visited**: ${replay.count_urls}\n`;
-            
+
             // URLs if available
             if (replay.urls && replay.urls.length > 0) {
               output += `- **URLs**:\n`;
@@ -1917,7 +1919,7 @@ server.tool(
                 output += `  - ${url}\n`;
               }
             }
-            
+
             // Error IDs if available
             if (replay.error_ids && replay.error_ids.length > 0) {
               output += `- **Error IDs**:\n`;
@@ -1925,7 +1927,7 @@ server.tool(
                 output += `  - ${errorId}\n`;
               }
             }
-            
+
             // Warning IDs if available
             if ('warning_ids' in replay && (replay as any).warning_ids && (replay as any).warning_ids.length > 0) {
               output += `- **Warning IDs**:\n`;
@@ -1933,7 +1935,7 @@ server.tool(
                 output += `  - ${warningId}\n`;
               }
             }
-            
+
             // Info IDs if available
             if ('info_ids' in replay && (replay as any).info_ids && (replay as any).info_ids.length > 0) {
               output += `- **Info IDs**:\n`;
@@ -1941,7 +1943,7 @@ server.tool(
                 output += `  - ${infoId}\n`;
               }
             }
-            
+
             // Trace IDs if available
             if (replay.trace_ids && replay.trace_ids.length > 0) {
               output += `- **Trace IDs**:\n`;
@@ -1949,7 +1951,7 @@ server.tool(
                 output += `  - ${traceId}\n`;
               }
             }
-            
+
             // Releases if available
             if (replay.releases && replay.releases.length > 0) {
               output += `- **Releases**:\n`;
@@ -1957,7 +1959,7 @@ server.tool(
                 output += `  - ${release}\n`;
               }
             }
-            
+
             // Tags if available
             if (replay.tags && Object.keys(replay.tags).length > 0) {
               output += `- **Tags**:\n`;
@@ -1965,7 +1967,7 @@ server.tool(
                 output += `  - ${key}: ${(values as string[]).join(', ')}\n`;
               }
             }
-            
+
             output += `\n`;
           }
         } else {
@@ -1973,15 +1975,15 @@ server.tool(
           output = `# Replays for Organization: ${organization_slug}${filterText}\n\n`;
           output += `| ID | Project ID | Started | Duration | Browser | Platform | Environment | Errors |\n`;
           output += `|:---|:-----------|:--------|:---------|:--------|:---------|:------------|:-------|\n`;
-          
+
           for (const replay of replays) {
             const startedDate = new Date(replay.started_at).toLocaleString();
             const duration = `${Math.floor(replay.duration / 60)}m ${replay.duration % 60}s`;
             const browser = replay.browser ? `${replay.browser.name} ${replay.browser.version}` : 'N/A';
-            
+
             output += `| ${replay.id} | ${replay.project_id} | ${startedDate} | ${duration} | ${browser} | ${replay.platform} | ${replay.environment} | ${replay.count_errors} |\n`;
           }
-          
+
           // Pagination information if cursor is provided
           if (cursor) {
             output += `\n*Note: This is a paginated result. Use the cursor parameter for the next page.*\n`;
@@ -1991,14 +1993,14 @@ server.tool(
         // Plain text format
         if (view === 'detailed') {
           output = `Replays for Organization: ${organization_slug}${filterText}\n\n`;
-          
+
           for (let i = 0; i < replays.length; i++) {
             const replay = replays[i];
             const startedDate = new Date(replay.started_at).toLocaleString();
             const finishedDate = replay.finished_at ? new Date(replay.finished_at).toLocaleString() : 'N/A';
             const duration = `${Math.floor(replay.duration / 60)}m ${replay.duration % 60}s`;
-            
-            output += `Replay ${i+1}: ${replay.id}\n`;
+
+            output += `Replay ${i + 1}: ${replay.id}\n`;
             output += `Project ID: ${replay.project_id}\n`;
             output += `Started: ${startedDate}\n`;
             output += `Finished: ${finishedDate}\n`;
@@ -2007,35 +2009,35 @@ server.tool(
             output += `Platform: ${replay.platform}\n`;
             output += `Activity: ${replay.activity}\n`;
             output += `Viewed: ${replay.has_viewed ? 'Yes' : 'No'}\n`;
-            
+
             // User information if available
             if (replay.user) {
               output += `User: ${replay.user.display_name || replay.user.username} (${replay.user.email})\n`;
             }
-            
+
             // Browser information if available
             if (replay.browser) {
               output += `Browser: ${replay.browser.name} ${replay.browser.version}\n`;
             }
-            
+
             // OS information if available
             if (replay.os) {
               output += `OS: ${replay.os.name} ${replay.os.version}\n`;
             }
-            
+
             // Device information if available
             if (replay.device) {
               output += `Device: ${replay.device.name} (${replay.device.brand} ${replay.device.model})\n`;
             }
-            
+
             // SDK information
             output += `SDK: ${replay.sdk.name} ${replay.sdk.version}\n`;
-            
+
             // Interaction metrics
             output += `Dead Clicks: ${replay.count_dead_clicks}\n`;
             output += `Rage Clicks: ${replay.count_rage_clicks}\n`;
             output += `Errors: ${replay.count_errors}\n`;
-            
+
             // Include warnings and infos if available
             if ('count_warnings' in replay) {
               output += `Warnings: ${(replay as any).count_warnings}\n`;
@@ -2043,9 +2045,9 @@ server.tool(
             if ('count_infos' in replay) {
               output += `Infos: ${(replay as any).count_infos}\n`;
             }
-            
+
             output += `URLs Visited: ${replay.count_urls}\n`;
-            
+
             // URLs if available
             if (replay.urls && replay.urls.length > 0) {
               output += `URLs:\n`;
@@ -2053,7 +2055,7 @@ server.tool(
                 output += `  ${url}\n`;
               }
             }
-            
+
             // Error IDs if available
             if (replay.error_ids && replay.error_ids.length > 0) {
               output += `Error IDs:\n`;
@@ -2061,7 +2063,7 @@ server.tool(
                 output += `  ${errorId}\n`;
               }
             }
-            
+
             // Warning IDs if available
             if ('warning_ids' in replay && (replay as any).warning_ids && (replay as any).warning_ids.length > 0) {
               output += `Warning IDs:\n`;
@@ -2069,7 +2071,7 @@ server.tool(
                 output += `  ${warningId}\n`;
               }
             }
-            
+
             // Info IDs if available
             if ('info_ids' in replay && (replay as any).info_ids && (replay as any).info_ids.length > 0) {
               output += `Info IDs:\n`;
@@ -2077,7 +2079,7 @@ server.tool(
                 output += `  ${infoId}\n`;
               }
             }
-            
+
             // Trace IDs if available
             if (replay.trace_ids && replay.trace_ids.length > 0) {
               output += `Trace IDs:\n`;
@@ -2085,7 +2087,7 @@ server.tool(
                 output += `  ${traceId}\n`;
               }
             }
-            
+
             // Releases if available
             if (replay.releases && replay.releases.length > 0) {
               output += `Releases:\n`;
@@ -2093,7 +2095,7 @@ server.tool(
                 output += `  ${release}\n`;
               }
             }
-            
+
             // Tags if available
             if (replay.tags && Object.keys(replay.tags).length > 0) {
               output += `Tags:\n`;
@@ -2101,10 +2103,10 @@ server.tool(
                 output += `  ${key}: ${(values as string[]).join(', ')}\n`;
               }
             }
-            
+
             output += `\n`;
           }
-          
+
           // Pagination information if cursor is provided
           if (cursor) {
             output += `Note: This is a paginated result. Use the cursor parameter for the next page.\n`;
@@ -2112,15 +2114,15 @@ server.tool(
         } else {
           // Create a summary plain text view
           output = `Replays for Organization: ${organization_slug}${filterText}\n\n`;
-          
+
           for (const replay of replays) {
             const startedDate = new Date(replay.started_at).toLocaleString();
             const duration = `${Math.floor(replay.duration / 60)}m ${replay.duration % 60}s`;
             const browser = replay.browser ? `${replay.browser.name} ${replay.browser.version}` : 'N/A';
-            
+
             output += `ID: ${replay.id}, Project ID: ${replay.project_id}, Started: ${startedDate}, Duration: ${duration}, Browser: ${browser}, Platform: ${replay.platform}, Environment: ${replay.environment}, Errors: ${replay.count_errors}\n`;
           }
-          
+
           // Pagination information if cursor is provided
           if (cursor) {
             output += `\nNote: This is a paginated result. Use the cursor parameter for the next page.\n`;
@@ -2146,10 +2148,187 @@ server.tool(
   }
 );
 
+server.tool(
+  "setup_sentry",
+  "Set up Sentry for a project. This tool creates a new Sentry project and provides the DSN and setup instructions for integrating Sentry into your application. The instructions are language-agnostic and can be used with any programming language or framework.",
+  {
+    organization_slug: z.string().describe("The slug of the organization to create the project in"),
+    team_slug: z.string().describe("The slug of the team to associate the project with"),
+    project_name: z.string().describe("The name of the project to create"),
+    environment: z.string().optional().describe("Optional environment name (e.g., production, staging, development)"),
+    format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
+  },
+  async ({ organization_slug, team_slug, project_name, environment, format }: {
+    organization_slug: string;
+    team_slug: string;
+    project_name: string;
+    environment?: string;
+    format: "plain" | "markdown"
+  }) => {
+    try {
+      // Debug input
+      console.error('DEBUG: Setting up Sentry for project:', project_name);
+      console.error('DEBUG: In organization:', organization_slug);
+      console.error('DEBUG: For team:', team_slug);
+      console.error('DEBUG: Environment:', environment);
+
+      // Step 1: Create the project
+      const createProjectUrl = `https://sentry.io/api/0/teams/${organization_slug}/${team_slug}/projects/`;
+      
+      const createProjectResponse = await fetch(createProjectUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SENTRY_AUTH}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: project_name
+        })
+      });
+
+      if (!createProjectResponse.ok) {
+        const errorText = await createProjectResponse.text();
+        console.error('DEBUG: Project creation failed:', createProjectResponse.status, errorText);
+        return {
+          content: [{
+            type: "text",
+            text: `Failed to create Sentry project: ${createProjectResponse.status} ${createProjectResponse.statusText}\n${errorText}`
+          }],
+          isError: true
+        };
+      }
+
+      const projectData: SentryProjectCreationResponse = await createProjectResponse.json();
+      console.error('DEBUG: Project created:', JSON.stringify(projectData, null, 2));
+
+      // Step 2: Get the client keys (DSN)
+      const clientKeysUrl = `https://sentry.io/api/0/projects/${organization_slug}/${projectData.slug}/keys/`;
+      
+      const clientKeysResponse = await fetch(clientKeysUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${SENTRY_AUTH}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!clientKeysResponse.ok) {
+        const errorText = await clientKeysResponse.text();
+        console.error('DEBUG: Client keys fetch failed:', clientKeysResponse.status, errorText);
+        return {
+          content: [{
+            type: "text",
+            text: `Failed to fetch client keys: ${clientKeysResponse.status} ${clientKeysResponse.statusText}\n${errorText}`
+          }],
+          isError: true
+        };
+      }
+
+      const clientKeys: SentryClientKey[] = await clientKeysResponse.json();
+      console.error('DEBUG: Client keys fetched:', JSON.stringify(clientKeys, null, 2));
+
+      if (clientKeys.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: `No client keys found for the project. Please check the project settings.`
+          }],
+          isError: true
+        };
+      }
+
+      const dsn = clientKeys[0].dsn.public;
+
+      // Prepare setup response
+      const setupResponse: SentrySetupResponse = {
+        projectName: projectData.name,
+        projectSlug: projectData.slug,
+        projectId: projectData.id,
+        dsn: dsn,
+        installationInstructions: {
+          generic: `Sentry.init({
+            dsn: "${dsn}",
+            ${environment ? `environment: "${environment}",` : ''}
+            // Set tracesSampleRate to 1.0 to capture 100% of transactions for performance monitoring
+            tracesSampleRate: 1.0,
+          });`
+        }
+      };
+
+      // Format the output
+      let output = '';
+
+      if (format === 'markdown') {
+        output = `# Sentry Project Setup: ${setupResponse.projectName}\n\n`;
+        output += `## Project Information\n\n`;
+        output += `- **Project Name**: ${setupResponse.projectName}\n`;
+        output += `- **Project Slug**: ${setupResponse.projectSlug}\n`;
+        if (environment) {
+          output += `- **Environment**: ${environment}\n`;
+        }
+        output += `- **DSN**: \`${setupResponse.dsn}\`\n\n`;
+
+        output += `## Installation Instructions\n\n`;
+        output += `### Generic Setup\n\n`;
+        output += "```javascript\n";
+        output += setupResponse.installationInstructions.generic.trim();
+        output += "\n```\n\n";
+        
+        output += `## Next Steps\n\n`;
+        output += `1. Choose the appropriate SDK for your platform and follow the installation instructions above.\n`;
+        output += `2. Configure additional options as needed for your specific use case.\n`;
+        output += `3. Test your integration by triggering a test event.\n`;
+        output += `4. Visit your [Sentry dashboard](https://sentry.io/organizations/${organization_slug}/issues/) to view and manage your errors.\n`;
+      } else {
+        // Plain text format
+        output = `Sentry Project Setup: ${setupResponse.projectName}\n\n`;
+        output += `Project Information:\n`;
+        output += `- Project Name: ${setupResponse.projectName}\n`;
+        output += `- Project Slug: ${setupResponse.projectSlug}\n`;
+        if (environment) {
+          output += `- Environment: ${environment}\n`;
+        }
+        output += `- DSN: ${setupResponse.dsn}\n\n`;
+
+        output += `Installation Instructions:\n\n`;
+        output += `Generic Setup:\n`;
+        output += setupResponse.installationInstructions.generic.trim();
+        output += "\n\n";
+        
+        output += `Next Steps:\n`;
+        output += `1. Choose the appropriate SDK for your platform and follow the installation instructions above.\n`;
+        output += `2. Configure additional options as needed for your specific use case.\n`;
+        output += `3. Test your integration by triggering a test event.\n`;
+        output += `4. Visit your Sentry dashboard to view and manage your errors: https://sentry.io/organizations/${organization_slug}/issues/\n`;
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: output
+        }]
+      };
+    } catch (error: any) {
+      console.error('DEBUG: Caught error:', error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error setting up Sentry: ${error.message}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
 async function main(): Promise<void> {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Sentry MCP Server running");
+  try {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("Sentry MCP Server running");
+  } catch (error: any) {
+    throw error;
+  }
 }
 
 main().catch((error: Error) => {
