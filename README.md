@@ -16,11 +16,6 @@ A Model Context Protocol (MCP) server for interacting with Sentry. This MCP serv
    npm install
    ```
 
-2. Set the Sentry authentication token as an environment variable:
-   ```
-   export SENTRY_AUTH=your_sentry_auth_token
-   ```
-
 ## Using this within an IDE 
 
 This MCP has been verified to work against Codeium Windsurf.
@@ -36,9 +31,8 @@ To use this MCP server with Claude, add the following configuration to your Clau
     "mcpServers": {
         "sentry": {
             "command": "npx",
-            "args": ["ts-node", "/Users/codydearkland/mcp-sentry-ts/index.ts"],
+            "args": ["ts-node", "/Users/<your-user-directory>/mcp-sentry-ts/index.ts"],
             "env": {
-                "SENTRY_DSN": "https://0c9f30459fd17d41a01c6476a20c1d31@o4508130833793024.ingest.us.sentry.io/4508879435071488",
                 "SENTRY_AUTH": "<YOUR_AUTH_TOKEN>"
             }
         }
@@ -46,7 +40,8 @@ To use this MCP server with Claude, add the following configuration to your Clau
 }
 ```
 
-Replace `<YOUR_AUTH_TOKEN>` with your Sentry authentication token.
+* Update with your directory path in the `args` field.
+* Replace `<YOUR_AUTH_TOKEN>` with your Sentry authentication token.
 
 ## Available Tools
 
