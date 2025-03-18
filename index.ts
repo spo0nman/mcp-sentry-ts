@@ -55,6 +55,7 @@ server.tool(
   }) => {
 
     try {
+      // Add breadcrumb for API call      
       const apiUrl: string = `https://sentry.io/api/0/organizations/${organization_slug}/projects/`;
 
       // Make the API request
@@ -2745,6 +2746,209 @@ server.tool(
   }
 );
 
+server.tool(
+  "search_errors_in_file",
+  "Search for Sentry errors occurring in a specific file. Find all issues related to a particular file path or filename.",
+  {
+    organization_slug: z
+      .string()
+      .describe("The slug of the organization in Sentry"),
+    project_slug: z
+      .string()
+      .describe("The slug of the project in Sentry"),
+    file_identifier: z
+      .string()
+      .describe("The path or name of the file to search for errors in"),
+    identifier_type: z
+      .enum(["filename", "filepath"])
+      .describe("Whether to search by filename or full filepath"),
+    format: z
+      .enum(["plain", "markdown"])
+      .default("markdown")
+      .describe("Output format (default: markdown)"),
+    view: z
+      .enum(["summary", "detailed"])
+      .default("detailed")
+      .describe("Level of detail in results (default: detailed)"),
+  },
+  async ({
+    organization_slug,
+    project_slug,
+    file_identifier,
+    identifier_type,
+    format,
+    view,
+  }: {
+    organization_slug: string;
+    project_slug: string;
+    file_identifier: string;
+    identifier_type: "filename" | "filepath";
+    format: "plain" | "markdown";
+    view: "summary" | "detailed";
+    time_range?: string;
+  }) => {
+    try {
+      // Debug input
+      console.error("DEBUG: Searching for errors in file:", file_identifier);
+      console.error("DEBUG: Identifier type:", identifier_type);
+      console.error("DEBUG: Organization:", organization_slug);
+      console.error("DEBUG: Project:", project_slug);
+      
+      // Construct the query based on identifier type
+      let query = identifier_type === "filepath" 
+        ? `stack.filename:"*${file_identifier}"`
+        : `stack.filename:"*${file_identifier}"`;
+            
+      // Construct the URL for the Sentry API
+      const apiUrl: string = `https://sentry.io/api/0/projects/${organization_slug}/${project_slug}/issues/?query=${encodeURIComponent(query)}`;
+
+      // Make the API request
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${SENTRY_AUTH}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      // Check if the request was successful
+      if (!response.ok) {
+        const errorText: string = await response.text();
+        console.error("DEBUG: API request failed:", response.status, errorText);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to search for errors: ${response.status} ${response.statusText}\n${errorText}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Parse the response
+      const issues: SentryProjectIssue[] = await response.json();
+      console.error(
+        "DEBUG: Found issues:",
+        JSON.stringify(issues, null, 2)
+      );
+
+      // Format the output based on the view type and format
+      let output: string = "";
+      
+      if (issues.length === 0) {
+        output = format === "markdown" 
+          ? `# No issues found\n\nNo errors found for ${identifier_type} \`${file_identifier}\` in project \`${project_slug}\`.`
+          : `No issues found\n\nNo errors found for ${identifier_type} ${file_identifier} in project ${project_slug}.`;
+          
+        return {
+          content: [{ type: "text", text: output }],
+        };
+      }
+
+      if (format === "markdown") {
+        output = `# Errors in ${identifier_type}: \`${file_identifier}\`\n\n`;
+        
+        if (view === "detailed") {
+          for (const issue of issues) {
+            output += `## ${issue.shortId}: ${issue.title}\n\n`;
+            output += `- **Status**: ${issue.status}\n`;
+            output += `- **Level**: ${issue.level}\n`;
+            output += `- **First Seen**: ${issue.firstSeen}\n`;
+            output += `- **Last Seen**: ${issue.lastSeen}\n`;
+            output += `- **Events**: ${issue.count}\n`;
+            output += `- **Users Affected**: ${issue.userCount}\n`;
+            output += `- **Culprit**: ${issue.culprit}\n`;
+            output += `- **Link**: [View in Sentry](${issue.permalink})\n\n`;
+            
+            if (issue.metadata && Object.keys(issue.metadata).length > 0) {
+              output += `### Metadata\n\n`;
+              for (const [key, value] of Object.entries(issue.metadata)) {
+                output += `- **${key}**: ${value}\n`;
+              }
+              output += `\n`;
+            }
+          }
+          
+          // Add summary at the end
+          output += `## Summary\n\n`;
+          output += `- **Total Issues**: ${issues.length}\n`;
+          output += `- **Project**: ${project_slug}\n`;
+          output += `- **Organization**: ${organization_slug}\n`;
+        } else {
+          // Summary view
+          output += `| Issue ID | Title | Status | Level | Events | Last Seen |\n`;
+          output += `|----------|-------|--------|-------|--------|----------|\n`;
+          
+          for (const issue of issues) {
+            output += `| [${issue.shortId}](${issue.permalink}) | ${issue.title} | ${issue.status} | ${issue.level} | ${issue.count} | ${issue.lastSeen} |\n`;
+          }
+          
+          output += `\n**Total Issues**: ${issues.length}\n`;
+        }
+      } else {
+        // Plain text format
+        output = `Errors in ${identifier_type}: ${file_identifier}\n\n`;
+        
+        if (view === "detailed") {
+          for (const issue of issues) {
+            output += `${issue.shortId}: ${issue.title}\n`;
+            output += `Status: ${issue.status}\n`;
+            output += `Level: ${issue.level}\n`;
+            output += `First Seen: ${issue.firstSeen}\n`;
+            output += `Last Seen: ${issue.lastSeen}\n`;
+            output += `Events: ${issue.count}\n`;
+            output += `Users Affected: ${issue.userCount}\n`;
+            output += `Culprit: ${issue.culprit}\n`;
+            output += `Link: ${issue.permalink}\n\n`;
+            
+            if (issue.metadata && Object.keys(issue.metadata).length > 0) {
+              output += `Metadata:\n`;
+              for (const [key, value] of Object.entries(issue.metadata)) {
+                output += `${key}: ${value}\n`;
+              }
+              output += `\n`;
+            }
+          }
+          
+          // Add summary at the end
+          output += `Summary:\n\n`;
+          output += `Total Issues: ${issues.length}\n`;
+          output += `Project: ${project_slug}\n`;
+          output += `Organization: ${organization_slug}\n`;
+        } else {
+          // Summary view
+          for (const issue of issues) {
+            output += `${issue.shortId} | ${issue.title} | ${issue.status} | ${issue.level} | ${issue.count} events | ${issue.lastSeen}\n`;
+          }
+          
+          output += `\nTotal Issues: ${issues.length}\n`;
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: output,
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error("DEBUG: Caught error:", error);      
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error searching for file errors: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
 async function main(): Promise<void> {
   try {
     const transport = new StdioServerTransport();
@@ -2757,5 +2961,4 @@ async function main(): Promise<void> {
 
 main().catch((error: Error) => {
   console.error("Fatal error in main():", error);
-  process.exit(1);
 });
