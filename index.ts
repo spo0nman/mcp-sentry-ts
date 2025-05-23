@@ -36,11 +36,12 @@ server.tool(
       .string()
       .describe("The slug of the organization to list projects from"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
       .enum(["plain", "markdown"])
+      .optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -193,6 +194,7 @@ server.tool(
       .describe("The short ID of the issue to resolve (e.g., PROJECT-123)"),
     format: z
       .enum(["plain", "markdown"])
+      .optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -332,11 +334,12 @@ server.tool(
       .string()
       .describe("The slug of the organization the issue belongs to"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
       .enum(["plain", "markdown"])
+      .optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -653,7 +656,7 @@ server.tool(
       .string()
       .describe("The slug of the project to list events from"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
@@ -899,7 +902,7 @@ server.tool(
         "The platform for the project (e.g., python, javascript, etc.)"
       ),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
@@ -1181,11 +1184,12 @@ server.tool(
       .string()
       .describe("The slug of the project to list issues from"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
       .enum(["plain", "markdown"])
+      .optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -1408,7 +1412,7 @@ server.tool(
       .describe("The slug of the organization the issue belongs to"),
     issue_id: z.string().describe("The ID of the issue to list events for"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
@@ -1666,7 +1670,7 @@ server.tool(
       .string()
       .describe("The slug of the organization the issue belongs to"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
@@ -2059,7 +2063,7 @@ server.tool(
       .default("markdown")
       .describe("Output format (default: markdown)"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("View type (default: detailed)"),
   },
@@ -2583,7 +2587,7 @@ server.tool(
     team_slug: z.string().describe("The slug of the team to associate the project with"),
     project_name: z.string().describe("The name of the project to create"),
     environment: z.string().optional().describe("Optional environment name (e.g., production, staging, development)"),
-    format: z.enum(["plain", "markdown"]).default("markdown").describe("Output format (default: markdown)")
+    format: z.enum(["plain", "markdown"]).optional().default("markdown").describe("Output format (default: markdown)")
   },
   async ({ organization_slug, team_slug, project_name, environment, format }: {
     organization_slug: string;
@@ -2767,7 +2771,7 @@ server.tool(
       .default("markdown")
       .describe("Output format (default: markdown)"),
     view: z
-      .enum(["summary", "detailed"])
+      .enum(["summary", "detailed"]).optional()
       .default("detailed")
       .describe("Level of detail in results (default: detailed)"),
   },
@@ -2934,8 +2938,7 @@ server.tool(
           },
         ],
       };
-    } catch (error: any) {
-      console.error("DEBUG: Caught error:", error);      
+    } catch (error: any) {      
       return {
         content: [
           {
