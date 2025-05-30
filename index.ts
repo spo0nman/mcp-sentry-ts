@@ -660,7 +660,7 @@ server.tool(
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -906,7 +906,7 @@ server.tool(
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -1416,7 +1416,7 @@ server.tool(
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -1674,7 +1674,7 @@ server.tool(
       .default("detailed")
       .describe("View type (default: detailed)"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
   },
@@ -2059,7 +2059,7 @@ server.tool(
       .describe("Optional limit on number of results to return"),
     cursor: z.string().optional().describe("Optional cursor for pagination"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
     view: z
@@ -2767,7 +2767,7 @@ server.tool(
       .enum(["filename", "filepath"])
       .describe("Whether to search by filename or full filepath"),
     format: z
-      .enum(["plain", "markdown"])
+      .enum(["plain", "markdown"]).optional()
       .default("markdown")
       .describe("Output format (default: markdown)"),
     view: z
